@@ -1,11 +1,11 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow logs
+os.environ['TF_USE_LEGACY_KERAS'] = '1'  # Use tf-keras for compatibility
 
 import cv2
 from deepface import DeepFace
 from collections import deque
 import numpy as np
-import mediapipe as mp
 
 # ========== CONFIGURATION ==========
 SMOOTHING_WINDOW = 5        # Number of frames to average emotions over
@@ -14,13 +14,8 @@ RESIZE_WIDTH = 640          # Resize frame for faster processing
 FACE_PADDING = 30           # Pixels to add around detected face
 # ===================================
 
-# Initialize MediaPipe Face Detection
-mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
-face_detection = mp_face_detection.FaceDetection(
-    model_selection=1,  # 0 for short-range (2m), 1 for full-range (5m)
-    min_detection_confidence=0.5
-)
+# Initialize OpenCV Face Detection (Haar Cascade)
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # Initialize webcam
 cap = cv2.VideoCapture(0)
@@ -58,22 +53,15 @@ while True:
     frame_count += 1
     
     if should_analyze:
-        # Convert BGR to RGB for MediaPipe
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert to grayscale for OpenCV face detection
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Detect faces using MediaPipe
-        results = face_detection.process(rgb_frame)
+        # Detect faces using OpenCV Haar Cascade
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
         
-        if results.detections:
+        if len(faces) > 0:
             # Get the first detected face
-            detection = results.detections[0]
-            
-            # Get bounding box from MediaPipe
-            bboxC = detection.location_data.relative_bounding_box
-            x = int(bboxC.xmin * frame_width)
-            y = int(bboxC.ymin * frame_height)
-            w = int(bboxC.width * frame_width)
-            h = int(bboxC.height * frame_height)
+            x, y, w, h = faces[0]
             
             # Add padding around face
             x = max(0, x - FACE_PADDING)
@@ -117,7 +105,7 @@ while True:
             except Exception as e:
                 pass  # Keep showing last known emotion
         else:
-            # No face detected by MediaPipe
+            # No face detected by OpenCV
             if not last_emotion_scores:
                 cv2.putText(frame, "No face detected", (10, 30), 
                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
@@ -150,4 +138,3 @@ while True:
 # Release resources
 cap.release()
 cv2.destroyAllWindows()
-face_detection.close()
