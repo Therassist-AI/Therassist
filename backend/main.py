@@ -1,7 +1,11 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow logs
+os.environ['TF_USE_LEGACY_KERAS'] = '1'  # Use tf-keras for compatibility
+
 import json
 import time
 import asyncio
+import base64
 from collections import deque
 from typing import Optional, Dict, List, Any
 from datetime import datetime
@@ -28,9 +32,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ========== CV CONFIGURATION ==========
+SMOOTHING_WINDOW = 5        # Number of frames to average emotions over
+FRAME_SKIP = 3              # Process every Nth frame (higher = faster but less responsive)
+RESIZE_WIDTH = 640          # Resize frame for faster processing
+FACE_PADDING = 30           # Pixels to add around detected face
+# ===================================
+
 # Environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-DETECTOR_BACKEND = os.getenv("DETECTOR_BACKEND", "ssd")
+DETECTOR_BACKEND = os.getenv("DETECTOR_BACKEND", "skip")  # Use 'skip' since we detect faces with OpenCV
+
+# Initialize OpenCV Face Detection (Haar Cascade)
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # Global camera state
 active_cameras: Dict[str, cv2.VideoCapture] = {}
@@ -190,91 +204,159 @@ def process_emotion_result(result: Any) -> Optional[Dict[str, float]]:
 async def websocket_emotions(websocket: WebSocket):
     await websocket.accept()
     camera = None
-    emotion_window = deque(maxlen=10)  # Last 10 results for 5-second window at 2 FPS
+    
+    # Emotion averaging system (matching working code)
+    emotion_history = deque(maxlen=SMOOTHING_WINDOW)
+    last_emotion = "neutral"
+    last_emotion_scores = {}
+    last_face_box = None
+    frame_count = 0
     
     try:
         # Open camera
+        print("Opening camera...")
         camera = cv2.VideoCapture(0)
         if not camera.isOpened():
+            print("ERROR: Could not open camera")
             await websocket.send_json({"status": "error", "message": "Could not open camera"})
             return
         
-        last_analysis_time = 0
-        analysis_interval = 0.5  # 500ms = 2 FPS
+        print("Camera opened successfully")
+        # Set camera properties (matching working code)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, RESIZE_WIDTH)
+        camera.set(cv2.CAP_PROP_FPS, 30)
+        
+        # Send initial connection message
+        await websocket.send_json({"status": "connected", "message": "Camera initialized"})
         
         while True:
+            # Read frame from webcam (OpenCV)
             ret, frame = camera.read()
+            
             if not ret:
+                print("Error: Could not read frame")
                 await websocket.send_json({"status": "error", "message": "Failed to read frame"})
                 break
             
-            current_time = time.time()
+            frame_height, frame_width = frame.shape[:2]
             
-            # Only analyze every 500ms
-            if current_time - last_analysis_time >= analysis_interval:
-                # Resize frame to 50% for speed
-                height, width = frame.shape[:2]
-                small_frame = cv2.resize(frame, (width // 2, height // 2))
+            # Only process every FRAME_SKIP frames for performance (matching working code)
+            should_analyze = (frame_count % FRAME_SKIP == 0)
+            frame_count += 1
+            
+            if should_analyze:
+                # Convert to grayscale for OpenCV face detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 
-                # Convert BGR to RGB
-                rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+                # Detect faces using OpenCV Haar Cascade
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
                 
-                try:
-                    # Analyze with DeepFace
-                    result = DeepFace.analyze(
-                        rgb_frame,
-                        actions=['emotion'],
-                        detector_backend=DETECTOR_BACKEND,
-                        enforce_detection=False,
-                        silent=True
-                    )
+                if len(faces) > 0:
+                    # Get the first detected face
+                    x, y, w, h = faces[0]
                     
-                    probs = process_emotion_result(result)
+                    # Add padding around face
+                    x = max(0, x - FACE_PADDING)
+                    y = max(0, y - FACE_PADDING)
+                    w = min(frame_width - x, w + 2 * FACE_PADDING)
+                    h = min(frame_height - y, h + 2 * FACE_PADDING)
                     
-                    if probs:
-                        emotion_window.append(probs)
+                    last_face_box = (x, y, w, h)
+                    
+                    try:
+                        # Crop face region for DeepFace emotion analysis
+                        face_crop = frame[y:y+h, x:x+w]
                         
-                        # Compute average probabilities
-                        if emotion_window:
-                            avg_probs = {}
-                            for key in probs.keys():
-                                avg_probs[key] = np.mean([d.get(key, 0) for d in emotion_window])
+                        if face_crop.size > 0:
+                            # Analyze emotion using DeepFace (skip face detection since we already have the face)
+                            result = DeepFace.analyze(
+                                img_path=face_crop,
+                                actions=['emotion'],
+                                enforce_detection=False,
+                                detector_backend='skip',  # Skip detection - we already cropped the face
+                                silent=True
+                            )
                             
-                            # Find dominant emotion
-                            dominant = max(avg_probs.items(), key=lambda x: x[1])[0]
-                            confidence = avg_probs[dominant]
+                            # Extract emotion data (matching working code)
+                            if isinstance(result, list):
+                                result = result[0]
                             
-                            # Send result
-                            await websocket.send_json({
-                                "ts": int(time.time() * 1000),
-                                "status": "ok",
-                                "dominant": dominant,
-                                "confidence": round(confidence, 2),
-                                "probs": {k: round(v, 2) for k, v in avg_probs.items()},
-                                "window_seconds": 5
-                            })
-                        else:
-                            await websocket.send_json({
-                                "ts": int(time.time() * 1000),
-                                "status": "no_face"
-                            })
-                    else:
+                            # Add current emotion scores to history
+                            emotion_history.append(result['emotion'])
+                            
+                            # Calculate averaged emotion scores
+                            if len(emotion_history) > 0:
+                                avg_scores = {}
+                                for emotion_name in emotion_history[0].keys():
+                                    avg_scores[emotion_name] = np.mean([frame_emotions[emotion_name] for frame_emotions in emotion_history])
+                                
+                                # Get dominant emotion from averaged scores
+                                last_emotion = max(avg_scores, key=avg_scores.get)
+                                last_emotion_scores = avg_scores
+                                
+                                # Send emotion result
+                                await websocket.send_json({
+                                    "ts": int(time.time() * 1000),
+                                    "status": "ok",
+                                    "dominant": last_emotion,
+                                    "confidence": round(avg_scores[last_emotion] / 100.0, 2),  # Convert percentage to 0-1
+                                    "probs": {k: round(v / 100.0, 2) for k, v in avg_scores.items()},  # Convert to 0-1
+                                })
+                            else:
+                                await websocket.send_json({
+                                    "ts": int(time.time() * 1000),
+                                    "status": "no_face"
+                                })
+                    except Exception as e:
+                        print(f"DeepFace error: {e}")
+                        # Keep showing last known emotion
+                        pass
+                else:
+                    # No face detected by OpenCV
+                    last_face_box = None
+                    if not last_emotion_scores:
                         await websocket.send_json({
                             "ts": int(time.time() * 1000),
                             "status": "no_face"
                         })
+            
+            # Draw face rectangle using last known position (OpenCV)
+            if last_face_box:
+                x, y, w, h = last_face_box
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            
+            # Display smoothed dominant emotion (OpenCV) - matching working code
+            if last_emotion_scores:
+                cv2.putText(frame, f"Emotion: {last_emotion}", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 
-                except Exception as e:
-                    print(f"DeepFace error: {e}")
+                # Display averaged emotion scores
+                y_offset = 70
+                for emotion_name, score in last_emotion_scores.items():
+                    text = f"{emotion_name}: {score:.1f}%"
+                    cv2.putText(frame, text, (10, y_offset), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    y_offset += 25
+            elif not last_face_box:
+                cv2.putText(frame, "No face detected", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+            # Send frame as base64 encoded JPEG (send every frame for smooth video)
+            try:
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if buffer is not None and len(buffer) > 0:
+                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                    
                     await websocket.send_json({
-                        "ts": int(time.time() * 1000),
-                        "status": "no_face"
+                        "type": "frame",
+                        "frame": frame_base64,
+                        "ts": int(time.time() * 1000)
                     })
-                
-                last_analysis_time = current_time
+            except Exception as e:
+                print(f"Error encoding/sending frame: {e}")
             
             # Small delay to prevent CPU overload
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.033)  # ~30 FPS
     
     except WebSocketDisconnect:
         print("WebSocket disconnected")

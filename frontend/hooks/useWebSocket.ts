@@ -3,7 +3,7 @@ import { useStore, EmotionData } from '@/lib/store'
 
 export function useWebSocket(enabled: boolean) {
   const wsRef = useRef<WebSocket | null>(null)
-  const { addEmotion } = useStore()
+  const { addEmotion, setVideoFrame } = useStore()
   
   useEffect(() => {
     if (!enabled) {
@@ -11,6 +11,7 @@ export function useWebSocket(enabled: boolean) {
         wsRef.current.close()
         wsRef.current = null
       }
+      setVideoFrame(null)
       return
     }
     
@@ -19,12 +20,33 @@ export function useWebSocket(enabled: boolean) {
     
     ws.onopen = () => {
       console.log('WebSocket connected')
+      console.log('Waiting for video frames...')
     }
     
     ws.onmessage = (event) => {
       try {
-        const data: EmotionData = JSON.parse(event.data)
-        addEmotion(data)
+        const data = JSON.parse(event.data)
+        
+        // Handle frame messages
+        if (data.type === 'frame' && data.frame) {
+          console.log('Received video frame')
+          setVideoFrame(`data:image/jpeg;base64,${data.frame}`)
+        } 
+        // Handle connection messages
+        else if (data.status === 'connected') {
+          console.log('Backend connected:', data.message)
+        }
+        // Handle emotion data messages
+        else if (data.status) {
+          const emotionData: EmotionData = {
+            ts: data.ts,
+            status: data.status,
+            dominant: data.dominant,
+            confidence: data.confidence,
+            probs: data.probs
+          }
+          addEmotion(emotionData)
+        }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e)
       }
@@ -36,6 +58,7 @@ export function useWebSocket(enabled: boolean) {
     
     ws.onclose = () => {
       console.log('WebSocket disconnected')
+      setVideoFrame(null)
     }
     
     return () => {
@@ -43,6 +66,7 @@ export function useWebSocket(enabled: boolean) {
         wsRef.current.close()
         wsRef.current = null
       }
+      setVideoFrame(null)
     }
-  }, [enabled, addEmotion])
+  }, [enabled, addEmotion, setVideoFrame])
 }

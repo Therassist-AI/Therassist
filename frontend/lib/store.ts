@@ -23,6 +23,7 @@ export interface SessionState {
   emotionHistory: EmotionData[]
   transcript: string
   stage: 'start' | 'middle' | 'end'
+  videoFrame: string | null
   
   setSessionId: (id: string) => void
   setCameraEnabled: (enabled: boolean) => void
@@ -32,6 +33,7 @@ export interface SessionState {
   addEmotion: (emotion: EmotionData) => void
   appendTranscript: (text: string) => void
   setStage: (stage: 'start' | 'middle' | 'end') => void
+  setVideoFrame: (frame: string | null) => void
   reset: () => void
 }
 
@@ -44,6 +46,7 @@ export const useStore = create<SessionState>((set) => ({
   emotionHistory: [],
   transcript: '',
   stage: 'start',
+  videoFrame: null,
   
   setSessionId: (id) => set({ sessionId: id }),
   setCameraEnabled: (enabled) => set({ cameraEnabled: enabled }),
@@ -61,6 +64,7 @@ export const useStore = create<SessionState>((set) => ({
     transcript: state.transcript ? `${state.transcript}\n${text}` : text
   })),
   setStage: (stage) => set({ stage }),
+  setVideoFrame: (frame) => set({ videoFrame: frame }),
   reset: () => set({
     sessionId: null,
     cameraEnabled: false,
@@ -69,6 +73,7 @@ export const useStore = create<SessionState>((set) => ({
     messages: [],
     emotionHistory: [],
     transcript: '',
-    stage: 'start'
+    stage: 'start',
+    videoFrame: null
   })
 }))

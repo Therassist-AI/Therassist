@@ -14,7 +14,7 @@ const EMOTION_COLORS: Record<string, string> = {
 }
 
 export default function EmotionPanel() {
-  const { emotionHistory, cameraEnabled } = useStore()
+  const { emotionHistory, cameraEnabled, videoFrame } = useStore()
   
   const recentEmotions = emotionHistory.slice(-60) // Last 60 data points for 30 seconds at 2 FPS
   
@@ -46,8 +46,31 @@ export default function EmotionPanel() {
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-xl font-semibold mb-4 text-gray-800">Emotion Signals</h2>
       
+      {/* Video Feed from OpenCV */}
+      <div className="mb-4">
+        {videoFrame ? (
+          <div className="relative rounded-lg overflow-hidden bg-black">
+            <img 
+              src={videoFrame} 
+              alt="Camera feed" 
+              className="w-full h-auto max-h-64 object-contain"
+            />
+            <div className="absolute top-2 left-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+              OpenCV + DeepFace
+            </div>
+          </div>
+        ) : (
+          <div className="w-full h-48 bg-gray-900 rounded-lg flex items-center justify-center text-gray-400">
+            <div className="text-center">
+              <div className="text-sm mb-2">Waiting for camera feed...</div>
+              <div className="text-xs">OpenCV processing will appear here</div>
+            </div>
+          </div>
+        )}
+      </div>
+      
       {isNoFace ? (
-        <div className="text-center py-8">
+        <div className="text-center py-4">
           <div className="text-gray-500 mb-2">No face detected</div>
           <div className="text-sm text-gray-400">Please ensure your face is visible to the camera</div>
         </div>
