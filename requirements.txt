@@ -1,2 +1,8 @@
+# Main dependency - manages tensorflow/tf-keras automatically
 deepface
-opencv-python
+
+# Force compatible opencv version (4.10.x works with numpy 1.x)
+opencv-python<4.11.0
+
+# Ensure numpy 1.x for TensorFlow compatibility
+numpy<2.0.0
