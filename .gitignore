@@ -2,3 +2,6 @@
 venv/
 env/
 .vscode/
+.env/
+.env
+sessions/

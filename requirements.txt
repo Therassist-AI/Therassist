@@ -1,2 +1,33 @@
+# ===========================================
+# Therassist Requirements
+# Works on: macOS, Windows, Linux
+# ===========================================
+
+# --- Emotion Detection ---
 deepface
-opencv-python
+tf-keras
+
+# --- Computer Vision ---
+opencv-python<4.11.0
+
+# --- Numeric Computing ---
+numpy<2.0.0
+
+# --- Backend API ---
+fastapi
+uvicorn[standard]
+python-dotenv
+python-multipart
+
+# --- Speech-to-Text (Local Whisper) ---
+openai-whisper
+# NOTE: Requires ffmpeg system binary!
+# - macOS: brew install ffmpeg
+# - Windows: choco install ffmpeg OR download from https://ffmpeg.org/download.html
+# - Linux: sudo apt install ffmpeg
+
+# --- LLM API Client (OpenAI-compatible) ---
+openai
+
+# --- SSL Certificate Handling ---
+certifi
