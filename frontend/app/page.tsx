@@ -42,6 +42,7 @@ export default function Home() {
   // Results
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
+  const [report, setReport] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState("");
   
   // Hooks
@@ -163,9 +164,10 @@ export default function Home() {
       
       const transcribeData = await transcribeRes.json();
       setTranscripts(transcribeData.transcripts);
+      setReport(transcribeData.report || null);
 
       // Get session summary
-      setProcessingStatus("Getting session summary...");
+      setProcessingStatus("Generating clinical report with AI...");
       const summaryRes = await fetch(`${API_BASE}/api/session/${sessionId}/summary`);
       const summaryData = await summaryRes.json();
       setSessionSummary(summaryData);
@@ -183,6 +185,7 @@ export default function Home() {
     setCurrentQuestionIndex(0);
     setTranscripts([]);
     setSessionSummary(null);
+    setReport(null);
     setProcessingStatus("");
   };
 
@@ -335,6 +338,16 @@ export default function Home() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Clinical Report */}
+              {report && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-purple-200 mb-3">📋 Clinical Report</h3>
+                  <div className="p-4 bg-white/5 rounded-xl border border-white/10 max-h-96 overflow-y-auto">
+                    <pre className="text-white text-sm whitespace-pre-wrap font-sans">{report}</pre>
                   </div>
                 </div>
               )}

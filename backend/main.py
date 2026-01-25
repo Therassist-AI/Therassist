@@ -38,6 +38,11 @@ FACE_PADDING = 30
 SESSIONS_DIR = Path("sessions")
 SESSIONS_DIR.mkdir(exist_ok=True)
 
+# Gemma LLM Configuration
+LLM_BASE_URL = os.getenv("LLM_BASE_URL")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL")
+
 # Pre-set therapy questions
 THERAPY_QUESTIONS = [
     "How are you feeling today? Take a moment to describe your current emotional state.",
@@ -74,6 +79,104 @@ def calculate_top_emotions(emotion_history: List[Dict], top_n: int = 2) -> List[
         {"emotion": emotion, "count": count, "percentage": round(count / total * 100, 1)}
         for emotion, count in sorted_emotions[:top_n]
     ]
+
+
+async def generate_therapy_report(session_id: str, transcript: str, session_dir: Path) -> str:
+    """Generate a therapy report using DeepSeek LLM based on transcript and emotion data."""
+    from openai import OpenAI
+    
+    # Load emotion data for all questions
+    emotion_summaries = []
+    for q_num in range(len(THERAPY_QUESTIONS)):
+        emotion_file = session_dir / f"q{q_num}_emotions.json"
+        if emotion_file.exists():
+            with open(emotion_file, "r") as f:
+                emotion_data = json.load(f)
+                top_emotions = emotion_data.get("top_emotions", [])
+                emotion_count = len(emotion_data.get("emotions", []))
+                
+                emotion_summaries.append({
+                    "question_number": q_num + 1,
+                    "question": THERAPY_QUESTIONS[q_num],
+                    "emotion_readings": emotion_count,
+                    "top_emotions": top_emotions
+                })
+    
+    # Build emotion summary text
+    emotion_text = "EMOTION ANALYSIS PER QUESTION:\n"
+    for es in emotion_summaries:
+        emotion_text += f"\nQuestion {es['question_number']}: {es['question']}\n"
+        emotion_text += f"  Total emotion readings: {es['emotion_readings']}\n"
+        if es['top_emotions']:
+            for te in es['top_emotions']:
+                emotion_text += f"  - {te['emotion'].capitalize()}: {te['percentage']}% of readings\n"
+        else:
+            emotion_text += "  - No emotion data recorded\n"
+    
+    # Create the prompt for the LLM
+    prompt = f"""You are a clinical psychology assistant helping therapists review patient screening sessions. 
+Analyze the following therapy session data and write a professional summary report for the therapist. The json file contains the patients moods during the session per question asked.
+
+SESSION TRANSCRIPT:
+{transcript}
+
+{emotion_text}
+
+Please write a comprehensive but concise report that includes:
+1. **Patient Overview**: Brief summary of the patient's current emotional state and concerns
+2. **Key Themes Identified**: Main topics or issues the patient discussed
+3. **Emotional Patterns**: Analysis of detected emotions and any notable patterns or discrepancies between what was said and emotions detected
+4. **Areas of Concern**: Any potential red flags or areas requiring follow-up
+5. **Positive Indicators**: Strengths, coping mechanisms, or positive elements noted
+6. **Recommendations**: Suggested focus areas for future sessions or therapeutic approaches
+
+Write in a professional, clinical tone suitable for a therapist's review. Be objective and evidence-based, referencing specific statements or emotional patterns from the data."""
+    
+    # Build the full prompt with system context
+    full_prompt = """You are a clinical psychology assistant specializing in therapy session analysis. Provide professional, empathetic, and evidence-based assessments.
+
+""" + prompt
+    
+    try:
+        # Initialize OpenAI client with Gemma endpoint
+        client = OpenAI(
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY
+        )
+        
+        # Call Gemma LLM using completions API
+        response = client.completions.create(
+            model=LLM_MODEL,
+            prompt=full_prompt,
+            max_tokens=2000
+        )
+        
+        report_content = response.choices[0].text
+        
+        # Format the final report
+        report = "THERASSIST CLINICAL REPORT\n"
+        report += "=" * 50 + "\n"
+        report += f"Session ID: {session_id}\n"
+        report += f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        report += f"Model: {LLM_MODEL}\n"
+        report += "=" * 50 + "\n\n"
+        report += report_content
+        report += "\n\n" + "=" * 50 + "\n"
+        report += "Note: This report is AI-generated and should be reviewed by a licensed therapist.\n"
+        report += "It is intended as a screening aid, not a clinical diagnosis.\n"
+        
+        return report
+        
+    except Exception as e:
+        error_report = f"THERASSIST CLINICAL REPORT\n"
+        error_report += "=" * 50 + "\n"
+        error_report += f"Session ID: {session_id}\n"
+        error_report += f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        error_report += "=" * 50 + "\n\n"
+        error_report += f"[Report generation failed: {str(e)}]\n\n"
+        error_report += "Raw Emotion Summary:\n"
+        error_report += emotion_text
+        return error_report
 
 
 @app.get("/api/questions")
@@ -245,11 +348,25 @@ async def transcribe_session(session_id: str):
     with open(transcript_path, "w") as f:
         f.write(combined_text)
     
+    # Generate LLM-based therapy report
+    report = await generate_therapy_report(
+        session_id=session_id,
+        transcript=combined_text,
+        session_dir=session_dir
+    )
+    
+    # Save report file
+    report_path = session_dir / "report.txt"
+    with open(report_path, "w") as f:
+        f.write(report)
+    
     return {
         "status": "completed",
         "transcripts": transcripts,
         "combined_transcript": combined_text,
-        "transcript_path": str(transcript_path)
+        "transcript_path": str(transcript_path),
+        "report": report,
+        "report_path": str(report_path)
     }
 
 
