@@ -1,24 +1,33 @@
-# Main dependency - manages tensorflow/tf-keras automatically
+# ===========================================
+# Therassist Requirements
+# Works on: macOS, Windows, Linux
+# ===========================================
+
+# --- Emotion Detection ---
 deepface
-
-# Force compatible opencv version (4.10.x works with numpy 1.x)
-opencv-python<4.11.0
-
-# Ensure numpy 1.x for TensorFlow compatibility
-numpy<2.0.0
-
-# Deep learning - tf-keras provides compatibility layer for DeepFace
 tf-keras
 
-# Backend API
+# --- Computer Vision ---
+opencv-python<4.11.0
+
+# --- Numeric Computing ---
+numpy<2.0.0
+
+# --- Backend API ---
 fastapi
 uvicorn[standard]
 python-dotenv
 python-multipart
 
-# Local speech-to-text transcription (no API key needed)
+# --- Speech-to-Text (Local Whisper) ---
 openai-whisper
+# NOTE: Requires ffmpeg system binary!
+# - macOS: brew install ffmpeg
+# - Windows: choco install ffmpeg OR download from https://ffmpeg.org/download.html
+# - Linux: sudo apt install ffmpeg
 
-# LLM API client (OpenAI-compatible, used for DeepSeek)
+# --- LLM API Client (OpenAI-compatible) ---
 openai
-ffmpeg-python
+
+# --- SSL Certificate Handling ---
+certifi
