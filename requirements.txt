@@ -14,3 +14,8 @@ tf-keras
 fastapi
 uvicorn[standard]
 python-dotenv
+python-multipart
+
+# Local speech-to-text transcription (no API key needed)
+openai-whisper
+ffmpeg-python
