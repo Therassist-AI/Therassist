@@ -115,7 +115,7 @@ async def generate_therapy_report(session_id: str, transcript: str, session_dir:
     
     # Create the prompt for the LLM
     prompt = f"""You are a clinical psychology assistant helping therapists review patient screening sessions. 
-Analyze the following therapy session data and write a professional summary report for the therapist. The json file contains the patients moods during the session per question asked.
+Analyze the following therapy session data and write a professional summary report for the therapist. The json file contains the patients moods during the session per question asked. 
 
 SESSION TRANSCRIPT:
 {transcript}
@@ -129,6 +129,12 @@ Please write a comprehensive but concise report that includes:
 4. **Areas of Concern**: Any potential red flags or areas requiring follow-up
 5. **Positive Indicators**: Strengths, coping mechanisms, or positive elements noted
 6. **Recommendations**: Suggested focus areas for future sessions or therapeutic approaches
+
+Formatting Guidelines:
+- use bullet points where appropriate for clarity
+- use professional and clinical language
+- Do not diagnose
+- Focus on clarity and usefulness for a therapist
 
 Write in a professional, clinical tone suitable for a therapist's review. Be objective and evidence-based, referencing specific statements or emotional patterns from the data."""
     

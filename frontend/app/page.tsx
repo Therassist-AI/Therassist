@@ -30,7 +30,7 @@ interface SessionSummary {
   }[];
 }
 
-type SessionState = "idle" | "recording" | "processing" | "complete";
+type SessionState = "idle" | "waiting-for-face" | "recording" | "processing" | "complete" | "therapist-view";
 
 export default function Home() {
   // Session state
@@ -38,6 +38,7 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<string[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [faceDetected, setFaceDetected] = useState(false);
   
   // Results
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
@@ -76,21 +77,38 @@ export default function Home() {
       setCurrentQuestionIndex(0);
       setTranscripts([]);
       setSessionSummary(null);
-      setSessionState("recording");
-      
-      // Start recording and emotion tracking
-      await startRecording();
+      setReport(null);
+      setFaceDetected(false);
+      setSessionState("waiting-for-face");
     } catch (err) {
       console.error("Failed to start session:", err);
     }
   };
 
-  // Connect WebSocket when sessionId is set and we're recording
+  // Connect WebSocket when sessionId is set and we're waiting for face or recording
   useEffect(() => {
-    if (sessionId && sessionState === "recording") {
+    if (sessionId && (sessionState === "waiting-for-face" || sessionState === "recording")) {
       connectWebSocket();
     }
   }, [sessionId, sessionState, connectWebSocket]);
+
+  // Monitor face detection and start recording when face is detected
+  useEffect(() => {
+    if (sessionState === "waiting-for-face" && currentEmotion && !faceDetected) {
+      setFaceDetected(true);
+    }
+  }, [sessionState, currentEmotion, faceDetected]);
+
+  // Start recording after face is detected
+  useEffect(() => {
+    if (sessionState === "waiting-for-face" && faceDetected) {
+      const timer = setTimeout(() => {
+        setSessionState("recording");
+        startRecording();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [faceDetected, sessionState, startRecording]);
 
   const saveCurrentQuestionData = async (audioBlob: Blob | null) => {
     if (!sessionId) return;
@@ -166,8 +184,21 @@ export default function Home() {
       setTranscripts(transcribeData.transcripts);
       setReport(transcribeData.report || null);
 
+      // Validate that files were created and have content
+      const hasValidTranscript = transcribeData.transcript_path && 
+        transcribeData.combined_transcript && 
+        transcribeData.combined_transcript.length > 100;
+      
+      const hasValidReport = transcribeData.report_path && 
+        transcribeData.report && 
+        transcribeData.report.length > 100;
+
+      if (!hasValidTranscript || !hasValidReport) {
+        console.warn("Session data may be incomplete");
+      }
+
       // Get session summary
-      setProcessingStatus("Generating clinical report with AI...");
+      setProcessingStatus("Finalizing session...");
       const summaryRes = await fetch(`${API_BASE}/api/session/${sessionId}/summary`);
       const summaryData = await summaryRes.json();
       setSessionSummary(summaryData);
@@ -226,6 +257,33 @@ export default function Home() {
             </div>
           )}
 
+          {/* WAITING FOR FACE STATE */}
+          {sessionState === "waiting-for-face" && (
+            <div className="text-center">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-blue-500/20 border-2 border-blue-400 flex items-center justify-center">
+                {faceDetected ? (
+                  <svg className="w-10 h-10 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-10 h-10 text-blue-300 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+              </div>
+              <h2 className="text-xl font-semibold text-white mb-2">
+                {faceDetected ? "Face Detected!" : "Looking for your face..."}
+              </h2>
+              <p className="text-purple-200">
+                {faceDetected ? "Starting session..." : "Please position yourself in front of the camera"}
+              </p>
+              <div className="mt-4 text-sm text-purple-300">
+                {isConnected ? "🟢 Camera connected" : "🔴 Connecting to camera..."}
+              </div>
+            </div>
+          )}
+
           {/* RECORDING STATE */}
           {sessionState === "recording" && (
             <div>
@@ -267,14 +325,15 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* Current emotion */}
-              {currentEmotion && (
-                <div className="mb-6 p-4 bg-white/10 rounded-xl border border-white/20 text-center">
-                  <p className="text-purple-200 text-sm mb-1">Current Emotion</p>
-                  <p className="text-2xl font-bold text-white capitalize">{currentEmotion}</p>
-                  <p className="text-purple-300 text-sm">{confidence}% confidence</p>
-                </div>
-              )}
+              {/* Emotion tracking status - don't show actual emotions to user */}
+              <div className="mb-6 p-4 bg-white/10 rounded-xl border border-white/20 text-center">
+                <p className="text-purple-200 text-sm mb-1">Emotion Tracking</p>
+                {isConnected && currentEmotion ? (
+                  <p className="text-xl font-bold text-green-400">✓ Active</p>
+                ) : (
+                  <p className="text-xl font-bold text-yellow-400">⟳ Initializing...</p>
+                )}
+              </div>
 
               {/* Error display */}
               {error && (
@@ -311,8 +370,47 @@ export default function Home() {
 
           {/* COMPLETE STATE */}
           {sessionState === "complete" && (
+            <div className="text-center">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-500/20 border-2 border-green-400 flex items-center justify-center">
+                <svg className="w-10 h-10 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-semibold text-white mb-2">Session Complete</h2>
+              <p className="text-purple-200 mb-6">
+                Thank you for completing your session. Your responses have been recorded.
+              </p>
+              
+              <div className="space-y-3">
+                <button
+                  onClick={() => setSessionState("therapist-view")}
+                  className="w-full py-3 px-6 bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl"
+                >
+                  🔒 Therapist View
+                </button>
+                
+                <button
+                  onClick={resetSession}
+                  className="w-full py-3 px-6 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl"
+                >
+                  Start New Session
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* THERAPIST VIEW STATE */}
+          {sessionState === "therapist-view" && (
             <div>
-              <h2 className="text-2xl font-semibold text-white mb-6 text-center">Session Complete</h2>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-semibold text-white">Therapist View</h2>
+                <button
+                  onClick={() => setSessionState("complete")}
+                  className="text-purple-300 hover:text-white transition-colors"
+                >
+                  ← Back
+                </button>
+              </div>
               
               {/* Overall emotions */}
               {sessionSummary && sessionSummary.overall_top_emotions.length > 0 && (
@@ -348,21 +446,6 @@ export default function Home() {
                   <h3 className="text-lg font-medium text-purple-200 mb-3">📋 Clinical Report</h3>
                   <div className="p-4 bg-white/5 rounded-xl border border-white/10 max-h-96 overflow-y-auto">
                     <pre className="text-white text-sm whitespace-pre-wrap font-sans">{report}</pre>
-                  </div>
-                </div>
-              )}
-
-              {/* Transcripts */}
-              {transcripts.length > 0 && (
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-purple-200 mb-3">Transcripts</h3>
-                  <div className="space-y-4 max-h-96 overflow-y-auto">
-                    {transcripts.map((item) => (
-                      <div key={item.question_number} className="p-4 bg-white/5 rounded-xl border border-white/10">
-                        <p className="text-purple-300 text-sm mb-1">Q{item.question_number}: {item.question}</p>
-                        <p className="text-white">{item.transcript}</p>
-                      </div>
-                    ))}
                   </div>
                 </div>
               )}
