@@ -2,6 +2,9 @@
 
 A therapy screening application that uses real-time emotion detection and speech-to-text transcription to help therapists analyze patient sessions. The application captures facial emotions during therapy questions, transcribes audio responses, and generates AI-powered clinical reports.
 
+## Demo Link
+https://www.youtube.com/watch?v=oBSS91ltZRQ
+
 ## Tech Stack
 
 ### Backend
